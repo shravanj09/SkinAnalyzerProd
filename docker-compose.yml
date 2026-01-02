@@ -1,0 +1,661 @@
+version: '3.8'
+
+# =============================================================================
+# AI FACIAL ANALYSIS PLATFORM - DOCKER COMPOSE
+# =============================================================================
+# Tier 1: docker-compose up -d
+# Tier 2: docker-compose --profile tier2 up -d
+# =============================================================================
+
+networks:
+  facial-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  model_cache:
+  ml_custom_cache:  # Persistent cache for FAN model weights
+
+services:
+  # ===========================================================================
+  # INFRASTRUCTURE SERVICES
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: facial-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-facial_analysis}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - facial-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis Cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: facial-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - facial-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO (S3-compatible storage)
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: facial-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - facial-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ===========================================================================
+  # ML MODEL SERVICES - TIER 1 (Required)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # MediaPipe Service (33 features)
+  # ---------------------------------------------------------------------------
+  mediapipe:
+    build:
+      context: ./services/ml-models/mediapipe
+      dockerfile: Dockerfile
+    container_name: mediapipe-service
+    environment:
+      - SERVICE_NAME=mediapipe
+      - PORT=8001
+    ports:
+      - "8001:8001"
+    volumes:
+      - model_cache:/app/models
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # OpenCV Service (6 moisture features)
+  # ---------------------------------------------------------------------------
+  opencv:
+    build:
+      context: ./services/ml-models/opencv
+      dockerfile: Dockerfile
+    container_name: opencv-service
+    environment:
+      - SERVICE_NAME=opencv
+      - PORT=8003
+    ports:
+      - "8003:8003"
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Shifaa-UNet Service (24 segmentation features)
+  # ---------------------------------------------------------------------------
+  shifaa-unet:
+    build:
+      context: ./services/ml-models/shifaa-unet
+      dockerfile: Dockerfile
+    container_name: shifaa-unet-service
+    environment:
+      - SERVICE_NAME=shifaa-unet
+      - PORT=8004
+      - MODEL_NAME=Ahmed-Selem/Shifaa-UNet
+      - DEVICE=cpu  # Change to cuda if GPU available
+    ports:
+      - "8004:8004"
+    volumes:
+      - model_cache:/app/models
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # FFHQ-Wrinkle Service (10 wrinkle features)
+  # ---------------------------------------------------------------------------
+  ffhq-wrinkle:
+    build:
+      context: ./services/ml-models/ffhq-wrinkle
+      dockerfile: Dockerfile
+    container_name: ffhq-wrinkle-service
+    environment:
+      - SERVICE_NAME=ffhq-wrinkle
+      - PORT=8005
+    ports:
+      - "8005:8005"
+    volumes:
+      - model_cache:/app/models
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Skin Type Service (10 color features)
+  # ---------------------------------------------------------------------------
+  skin-type:
+    build:
+      context: ./services/ml-models/skin-type
+      dockerfile: Dockerfile
+    container_name: skin-type-service
+    environment:
+      - SERVICE_NAME=skin-type
+      - PORT=8006
+      - MODEL_NAME=driboune/skin_type
+    ports:
+      - "8006:8006"
+    volumes:
+      - model_cache:/app/models
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Spots Detection Service (8 spot features)
+  # ---------------------------------------------------------------------------
+  spots-detection:
+    build:
+      context: ./services/ml-models/spots-detection
+      dockerfile: Dockerfile
+    container_name: spots-detection-service
+    environment:
+      - SERVICE_NAME=spots-detection
+      - PORT=8007
+      - MODEL_NAME=Anwarkh1/Skin_Cancer-Image_Classification
+    ports:
+      - "8007:8007"
+    volumes:
+      - model_cache:/app/models
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Acne Detection Service (7 acne features)
+  # ---------------------------------------------------------------------------
+  acne-detection:
+    build:
+      context: ./services/ml-models/acne-detection
+      dockerfile: Dockerfile
+    container_name: acne-detection-service
+    environment:
+      - SERVICE_NAME=acne-detection
+      - PORT=8008
+      - MODEL_NAME=imfarzanansari/skintelligent-acne
+    ports:
+      - "8008:8008"
+    volumes:
+      - model_cache:/app/models
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # SAM Service (7 oiliness features) - GPU intensive
+  # ---------------------------------------------------------------------------
+  sam:
+    build:
+      context: ./services/ml-models/sam
+      dockerfile: Dockerfile
+    container_name: sam-service
+    environment:
+      - SERVICE_NAME=sam
+      - PORT=8009
+      - MODEL_NAME=facebook/sam-vit-base
+      - DEVICE=cpu  # Change to cuda if GPU available
+    ports:
+      - "8009:8009"
+    volumes:
+      - model_cache:/app/models
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Claude API Service (13 subjective features)
+  # ---------------------------------------------------------------------------
+  claude-api:
+    build:
+      context: ./services/ml-models/claude-api
+      dockerfile: Dockerfile
+    container_name: claude-api-service
+    environment:
+      - SERVICE_NAME=claude-api
+      - PORT=8010
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4.5-20250929}
+    ports:
+      - "8010:8010"
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Google Derm Foundation Service (State-of-the-art dermatology foundation model)
+  # ---------------------------------------------------------------------------
+  derm-foundation:
+    build:
+      context: ./services/ml-models/derm-foundation
+      dockerfile: Dockerfile
+    container_name: derm-foundation-service
+    environment:
+      - SERVICE_NAME=derm-foundation
+      - PORT=8024
+      - MODEL_NAME=google/derm-foundation
+    ports:
+      - "8024:8024"
+    volumes:
+      - model_cache:/app/models
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8024/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # ML-Custom Service (27 enterprise-grade features with 93-96% accuracy)
+  # Uses Face Alignment Network (FAN) + Advanced Analytics
+  # ---------------------------------------------------------------------------
+  ml-custom:
+    build:
+      context: ./services/ml-models/ml-custom
+      dockerfile: Dockerfile
+    container_name: ml-custom-service
+    environment:
+      - SERVICE_NAME=ml-custom
+      - PORT=8025
+      - TORCH_HOME=/app/.cache/torch  # Persist torch cache
+    ports:
+      - "8025:8025"
+    volumes:
+      - ml_custom_cache:/app/.cache  # Persist model weights (no re-download)
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8025/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # Increased for first-time model download
+    restart: unless-stopped
+
+  # ===========================================================================
+  # INFRASTRUCTURE SERVICES
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Image Storage Service
+  # ---------------------------------------------------------------------------
+  image-storage:
+    build:
+      context: ./services/image-storage
+      dockerfile: Dockerfile
+    container_name: image-storage-service
+    environment:
+      - SERVICE_NAME=image-storage
+      - PORT=8022
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-facial-analysis-images}
+    ports:
+      - "8022:8022"
+    depends_on:
+      - minio
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8022/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # User & History Service
+  # ---------------------------------------------------------------------------
+  user-history:
+    build:
+      context: ./services/user-history
+      dockerfile: Dockerfile
+    container_name: user-history-service
+    environment:
+      - SERVICE_NAME=user-history
+      - PORT=8023
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    ports:
+      - "8023:8023"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8023/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Recommendation Service
+  # ---------------------------------------------------------------------------
+  recommendation:
+    build:
+      context: ./services/recommendation
+      dockerfile: Dockerfile
+    container_name: recommendation-service
+    environment:
+      - SERVICE_NAME=recommendation
+      - PORT=8021
+    ports:
+      - "8021:8021"
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8021/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ===========================================================================
+  # API GATEWAY (Orchestrator)
+  # ===========================================================================
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    environment:
+      - SERVICE_NAME=api-gateway
+      - PORT=8000
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key}
+      - MEDIAPIPE_URL=http://mediapipe:8001
+      - OPENCV_URL=http://opencv:8003
+      - SHIFAA_UNET_URL=http://shifaa-unet:8004
+      - FFHQ_WRINKLE_URL=http://ffhq-wrinkle:8005
+      - SKIN_TYPE_URL=http://skin-type:8006
+      - SPOTS_DETECTION_URL=http://spots-detection:8007
+      - ACNE_DETECTION_URL=http://acne-detection:8008
+      - SAM_URL=http://sam:8009
+      - CLAUDE_API_URL=http://claude-api:8010
+      - DERM_FOUNDATION_URL=http://derm-foundation:8024
+      - ML_CUSTOM_URL=http://ml-custom:8025
+      - IMAGE_STORAGE_URL=http://image-storage:8022
+      - USER_HISTORY_URL=http://user-history:8023
+      - RECOMMENDATION_URL=http://recommendation:8021
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+      - mediapipe
+      - opencv
+      - shifaa-unet
+      - ffhq-wrinkle
+      - skin-type
+      - spots-detection
+      - acne-detection
+      - sam
+      - claude-api
+      - derm-foundation
+      - ml-custom
+      - image-storage
+      - user-history
+      - recommendation
+    networks:
+      - facial-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ===========================================================================
+  # FRONTEND (React)
+  # ===========================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend-app
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api-gateway
+    networks:
+      - facial-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # TIER 2 MODELS (Optional - use --profile tier2)
+  # ===========================================================================
+
+  # U-Net Dark Circles Service (6 features)
+  unet-dark-circles:
+    build:
+      context: ./services/ml-models/unet-dark-circles
+      dockerfile: Dockerfile
+    container_name: unet-dark-circles-service
+    environment:
+      - SERVICE_NAME=unet-dark-circles
+      - PORT=8011
+    ports:
+      - "8011:8011"
+    volumes:
+      - ./models/custom/unet_dark_circles.pth:/app/models/model.pth
+    networks:
+      - facial-network
+    profiles:
+      - tier2
+    restart: unless-stopped
+
+  # U-Net Redness Service (13 features)
+  unet-redness:
+    build:
+      context: ./services/ml-models/unet-redness
+      dockerfile: Dockerfile
+    container_name: unet-redness-service
+    environment:
+      - SERVICE_NAME=unet-redness
+      - PORT=8012
+    ports:
+      - "8012:8012"
+    volumes:
+      - ./models/custom/unet_redness.pth:/app/models/model.pth
+    networks:
+      - facial-network
+    profiles:
+      - tier2
+    restart: unless-stopped
+
+  # EfficientNet-B5 Texture Service (9 features)
+  efficientnet-texture:
+    build:
+      context: ./services/ml-models/efficientnet-texture
+      dockerfile: Dockerfile
+    container_name: efficientnet-texture-service
+    environment:
+      - SERVICE_NAME=efficientnet-texture
+      - PORT=8013
+    ports:
+      - "8013:8013"
+    volumes:
+      - ./models/custom/efficientnet_b5_texture.pth:/app/models/model.pth
+    networks:
+      - facial-network
+    profiles:
+      - tier2
+    restart: unless-stopped
