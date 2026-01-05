@@ -39,7 +39,7 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: D:\DockerData\facial_alignment
+      device: D:\DockerData\ml_custom
 
 services:
   # ===========================================================================
@@ -246,6 +246,10 @@ services:
       - SERVICE_NAME=skin-type
       - PORT=8006
       - MODEL_NAME=driboune/skin_type
+      - HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_TOKEN}
+      - HF_HOME=/app/models
+      - HUGGINGFACE_HUB_CACHE=/app/models
+      - TRANSFORMERS_CACHE=/app/models
     ports:
       - "8006:8006"
     volumes:
@@ -276,6 +280,10 @@ services:
       - SERVICE_NAME=spots-detection
       - PORT=8007
       - MODEL_NAME=Anwarkh1/Skin_Cancer-Image_Classification
+      - HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_TOKEN}
+      - HF_HOME=/app/models
+      - HUGGINGFACE_HUB_CACHE=/app/models
+      - TRANSFORMERS_CACHE=/app/models
     ports:
       - "8007:8007"
     volumes:
@@ -306,6 +314,10 @@ services:
       - SERVICE_NAME=acne-detection
       - PORT=8008
       - MODEL_NAME=imfarzanansari/skintelligent-acne
+      - HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_TOKEN}
+      - HF_HOME=/app/models
+      - HUGGINGFACE_HUB_CACHE=/app/models
+      - TRANSFORMERS_CACHE=/app/models
     ports:
       - "8008:8008"
     volumes:
