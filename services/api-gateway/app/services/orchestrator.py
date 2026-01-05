@@ -10,7 +10,7 @@ import time
 from io import BytesIO
 
 from app.core.config import settings
-from app.utils.feature_mapper import add_csv_aliases, categorize_features
+from app.utils.feature_mapper import add_csv_aliases
 from app.utils.category_hierarchy import build_hierarchical_response
 
 logger = logging.getLogger(__name__)
@@ -103,19 +103,14 @@ class Orchestrator:
                 model_results[model_name] = {"status": "error", "error": str(result)}
             else:
                 model_results[model_name] = {"status": "success", "latency_ms": result.get("latency_ms", 0)}
-                # Merge features
+                # Normalize feature names for this service and filter duplicates
                 if "features" in result:
-                    features.update(result["features"])
-
-        # Add CSV-compatible aliases to all features
-        features = add_csv_aliases(features)
+                    normalized = add_csv_aliases(result["features"], service_name=model_name)
+                    features.update(normalized)
 
         # Calculate composite health scores (enterprise-grade metrics)
         composite_scores = self._calculate_composite_scores(features)
         features.update(composite_scores)
-
-        # Generate categorized view
-        categorized_features = categorize_features(features, use_csv_names=True)
 
         # Build hierarchical structure (Category → Model → Features)
         hierarchical_features = build_hierarchical_response(features, model_results)
@@ -150,7 +145,6 @@ class Orchestrator:
             "processing_time_seconds": round(processing_time, 2),
             "features": features,
             "feature_count": len(features),
-            "categorized_features": categorized_features,
             "hierarchical_features": hierarchical_features,
             "model_results": model_results,
             "overall_score": overall_score,
@@ -171,7 +165,7 @@ class Orchestrator:
             "mediapipe": {
                 "enabled": settings.ENABLE_MEDIAPIPE,
                 "url": settings.MEDIAPIPE_URL,
-                "timeout": 30  # Increased for mediapipe processing
+                "timeout": 90  # 468-point facial landmarks need 60-90s
             },
             "opencv": {
                 "enabled": settings.ENABLE_OPENCV,
@@ -213,15 +207,15 @@ class Orchestrator:
                 "url": settings.CLAUDE_API_URL,
                 "timeout": 30  # Claude API can be slow
             },
-            "ml-custom": {
-                "enabled": settings.ENABLE_ML_CUSTOM,
-                "url": settings.ML_CUSTOM_URL,
-                "timeout": 90  # FAN is CPU-intensive, needs 60-90s for 68 landmarks
+            "facial-alignment": {
+                "enabled": settings.ENABLE_FACIAL_ALIGNMENT,
+                "url": settings.FACIAL_ALIGNMENT_URL,
+                "timeout": 180  # FAN is CPU-intensive, needs 120-180s for 68 landmarks + advanced analytics
             },
             "derm-foundation": {
                 "enabled": settings.ENABLE_DERM_FOUNDATION,
                 "url": settings.DERM_FOUNDATION_URL,
-                "timeout": 60  # Transformer model, GPU accelerated
+                "timeout": 180  # Transformer model with 43 features, needs 120-180s
             }
         }
 

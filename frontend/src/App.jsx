@@ -24,7 +24,6 @@ function App() {
           <h1 className="text-2xl font-bold text-gray-900">
             AI Facial Analysis Platform
           </h1>
-          <p className="text-sm text-gray-600">Production-Grade • 118 Features • Real-time Analysis</p>
         </div>
       </header>
 

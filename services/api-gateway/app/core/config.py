@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     ACNE_DETECTION_URL: str = "http://acne-detection:8008"
     SAM_URL: str = "http://sam:8009"
     CLAUDE_API_URL: str = "http://claude-api:8010"
-    ML_CUSTOM_URL: str = "http://ml-custom:8025"
+    FACIAL_ALIGNMENT_URL: str = "http://facial-alignment:8025"
     DERM_FOUNDATION_URL: str = "http://derm-foundation:8024"
 
     # Tier 2 Models (optional)
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     ENABLE_ACNE_DETECTION: bool = True
     ENABLE_SAM: bool = True
     ENABLE_CLAUDE_API: bool = True
-    ENABLE_ML_CUSTOM: bool = True
+    ENABLE_FACIAL_ALIGNMENT: bool = True
     ENABLE_DERM_FOUNDATION: bool = True
 
     # Tier 2 Feature Flags

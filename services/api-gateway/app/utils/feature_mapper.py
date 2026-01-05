@@ -1,11 +1,10 @@
 """
-Feature Name Mapping Utility
-Maps service-specific feature names to CSV-standardized names
-Allows both naming schemes to coexist
+Enterprise Feature Mapper - ONE unique name per feature
+Maps ML service outputs to canonical enterprise feature names
 """
 
-# Complete mapping: service_name -> csv_name
-SERVICE_TO_CSV_MAPPING = {
+# Canonical feature name mapping: service_output -> enterprise_name
+FEATURE_NAME_MAPPING = {
     # Skin Type Service (11 features)
     "st_fitzpatrick_type": "fitzpatrick_type",
     "st_skin_type_category": "skin_type_category",
@@ -36,10 +35,11 @@ SERVICE_TO_CSV_MAPPING = {
     "spots_age_spots_detected": "age_spots_present",
     "spots_hyperpigmentation_level": "hyperpigmentation_level",
     "spots_lesion_presence": "lesion_detected",
-    "spots_total_spot_count": "total_spots_count",
+    "total_spot_count": "total_spots_count",
     "spots_forehead": "forehead_spots",
     "spots_cheeks": "cheeks_spots",
     "spots_chin": "chin_spots",
+    # spots_pigmentation_variance: no mapping, keep as-is
 
     # SAM Oiliness Service (7 features)
     "sam_t_zone_oiliness": "t_zone_oiliness",
@@ -66,15 +66,64 @@ SERVICE_TO_CSV_MAPPING = {
     "wrinkle_nasolabial_right": "right_nasolabial",
     "wrinkle_mouth_area": "mouth_wrinkles",
 
-    # Claude API Service (13 features) - Already mostly CSV-compatible
-    # These don't need mapping as they match CSV names
+    # OpenCV, Shifaa-UNet, Derm-Foundation, MediaPipe:
+    # Keep original names (already clean or have necessary prefixes)
+
+    # Claude API: Keep original names (already clean)
+    # ML-Custom: Keep original names (already descriptive)
+    # API-Gateway composites: Keep original names
 }
 
-# Reverse mapping for bidirectional lookup
-CSV_TO_SERVICE_MAPPING = {v: k for k, v in SERVICE_TO_CSV_MAPPING.items()}
+# Features to REMOVE (extracted by multiple models, keeping only best)
+FEATURES_TO_REMOVE = {
+    "claude-api": [
+        "wrinkle_depth_severity"  # ffhq-wrinkle is more accurate
+    ],
+    "facial-alignment": [
+        "left_eye_aspect_ratio",  # mediapipe is more accurate
+        "right_eye_aspect_ratio"  # mediapipe is more accurate
+    ]
+}
 
-# Category definitions matching CSV structure
-CSV_CATEGORIES = {
+
+def normalize_feature_names(features: dict, service_name: str = None) -> dict:
+    """
+    Normalize feature names to enterprise canonical names.
+    Removes duplicate features from less accurate models.
+
+    Args:
+        features: Raw features from ML service
+        service_name: Name of the service (for filtering duplicates)
+
+    Returns:
+        Features with enterprise canonical names, duplicates removed
+    """
+    normalized = {}
+
+    for feature_name, feature_value in features.items():
+        # Skip features that should be removed from this service
+        if service_name and service_name in FEATURES_TO_REMOVE:
+            if feature_name in FEATURES_TO_REMOVE[service_name]:
+                continue  # Skip this duplicate feature
+
+        # Rename to canonical name if mapping exists
+        canonical_name = FEATURE_NAME_MAPPING.get(feature_name, feature_name)
+        normalized[canonical_name] = feature_value
+
+    return normalized
+
+
+# Export for backwards compatibility
+def add_csv_aliases(features: dict, service_name: str = None) -> dict:
+    """
+    DEPRECATED: Use normalize_feature_names() instead.
+    This function is kept for backwards compatibility but now just returns normalized names.
+    """
+    return normalize_feature_names(features, service_name)
+
+
+# Category definitions for enterprise features
+ENTERPRISE_CATEGORIES = {
     "Skin Type & Color": [
         "fitzpatrick_type",
         "skin_type_category",
@@ -94,12 +143,10 @@ CSV_CATEGORIES = {
         "forehead_oiliness",
         "nose_oiliness",
         "cheek_oiliness",
-        "moisture_type"
-    ],
-    "Pores": [
+        "moisture_type",
         "pore_visibility"
     ],
-    "Acne & Inflammation": [
+    "Acne & Blemishes": [
         "acne_severity",
         "acne_count",
         "acne_confidence",
@@ -109,6 +156,22 @@ CSV_CATEGORIES = {
         "chin_acne",
         "nose_acne",
         "inflammation_level"
+    ],
+    "Wrinkles & Aging": [
+        "wrinkle_density",
+        "wrinkle_depth",
+        "fine_lines_count",
+        "deep_wrinkles_count",
+        "skin_smoothness",
+        "wrinkle_severity",
+        "wrinkle_dominant_area",
+        "forehead_wrinkles",
+        "left_crow_feet",
+        "right_crow_feet",
+        "left_nasolabial",
+        "right_nasolabial",
+        "mouth_wrinkles",
+        "fine_lines_presence"
     ],
     "Spots & Pigmentation": [
         "spots_severity",
@@ -120,145 +183,12 @@ CSV_CATEGORIES = {
         "forehead_spots",
         "cheeks_spots",
         "chin_spots",
-        "melasma_severity",
-        "freckles_count",
-        "post_acne_marks_count",
-        "uneven_skin_tone"
+        "spots_pigmentation_variance"
     ],
-    "Wrinkles & Aging": [
-        "wrinkle_density",
-        "wrinkle_depth",
-        "wrinkle_severity",
-        "fine_lines_count",
-        "deep_wrinkles_count",
-        "fine_lines_presence",
-        "forehead_wrinkles",
-        "left_crow_feet",
-        "right_crow_feet",
-        "left_nasolabial",
-        "right_nasolabial",
-        "mouth_wrinkles",
-        "wrinkle_dominant_area"
-    ],
-    "Texture & Quality": [
+    "Texture & Smoothness": [
         "texture_roughness",
         "skin_smoothness",
-        "skin_quality_overall"
-    ],
-    "Dark Circles & Eye Area": [
-        "dark_circle_type",
-        "dark_circle_severity",
-        "eye_bags_puffiness",
-        "tear_trough_hollowness"
-    ],
-    "Overall Assessment": [
-        "estimated_age_appearance",
-        "primary_concerns"
+        "df_texture_uniformity",
+        "df_overall_texture_score"
     ]
 }
-
-
-def add_csv_aliases(features: dict) -> dict:
-    """
-    Add CSV-compatible aliases to feature dictionary
-    Returns new dict with both service names and CSV names
-
-    Example:
-        Input: {"st_fitzpatrick_type": 3}
-        Output: {"st_fitzpatrick_type": 3, "fitzpatrick_type": 3}
-    """
-    result = features.copy()
-
-    for service_name, csv_name in SERVICE_TO_CSV_MAPPING.items():
-        if service_name in features:
-            # Add CSV alias
-            result[csv_name] = features[service_name]
-
-    return result
-
-
-def get_csv_name(service_name: str) -> str:
-    """
-    Get CSV-compatible name for a service feature name
-    Returns original name if no mapping exists
-    """
-    return SERVICE_TO_CSV_MAPPING.get(service_name, service_name)
-
-
-def get_service_name(csv_name: str) -> str:
-    """
-    Get service feature name from CSV name
-    Returns original name if no mapping exists
-    """
-    return CSV_TO_SERVICE_MAPPING.get(csv_name, csv_name)
-
-
-def categorize_features(features: dict, use_csv_names: bool = True) -> dict:
-    """
-    Categorize features according to CSV category structure
-
-    Args:
-        features: Dictionary of feature name -> value
-        use_csv_names: If True, use CSV names for categorization; else use service names
-
-    Returns:
-        Dictionary with structure: {category_name: {feature_name: value}}
-    """
-    categorized = {category: {} for category in CSV_CATEGORIES.keys()}
-    categorized["Uncategorized"] = {}
-
-    for feature_name, feature_value in features.items():
-        # Determine which name to use for lookup
-        lookup_name = feature_name
-        if not use_csv_names and feature_name in CSV_TO_SERVICE_MAPPING:
-            lookup_name = CSV_TO_SERVICE_MAPPING[feature_name]
-        elif use_csv_names and feature_name in SERVICE_TO_CSV_MAPPING:
-            lookup_name = SERVICE_TO_CSV_MAPPING[feature_name]
-
-        # Find category
-        found_category = False
-        for category, category_features in CSV_CATEGORIES.items():
-            if lookup_name in category_features:
-                categorized[category][feature_name] = feature_value
-                found_category = True
-                break
-
-        if not found_category:
-            categorized["Uncategorized"][feature_name] = feature_value
-
-    # Remove empty categories
-    return {k: v for k, v in categorized.items() if v}
-
-
-def get_feature_info(feature_name: str) -> dict:
-    """
-    Get comprehensive information about a feature
-
-    Returns:
-        {
-            "service_name": str,
-            "csv_name": str,
-            "category": str,
-            "has_mapping": bool
-        }
-    """
-    # Determine if this is a service name or CSV name
-    is_service_name = feature_name in SERVICE_TO_CSV_MAPPING
-    is_csv_name = feature_name in CSV_TO_SERVICE_MAPPING
-
-    service_name = feature_name if is_service_name else CSV_TO_SERVICE_MAPPING.get(feature_name, feature_name)
-    csv_name = feature_name if is_csv_name else SERVICE_TO_CSV_MAPPING.get(feature_name, feature_name)
-
-    # Find category
-    category = "Unknown"
-    for cat, features in CSV_CATEGORIES.items():
-        if csv_name in features:
-            category = cat
-            break
-
-    return {
-        "service_name": service_name,
-        "csv_name": csv_name,
-        "category": category,
-        "has_mapping": is_service_name or is_csv_name
-    }

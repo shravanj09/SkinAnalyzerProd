@@ -1,5 +1,3 @@
-version: '3.8'
-
 # =============================================================================
 # AI FACIAL ANALYSIS PLATFORM - DOCKER COMPOSE
 # =============================================================================
@@ -13,10 +11,35 @@ networks:
 
 volumes:
   postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:\DockerData\postgres
   redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:\DockerData\redis
   minio_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:\DockerData\minio
   model_cache:
-  ml_custom_cache:  # Persistent cache for FAN model weights
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:\DockerData\models
+  facial_alignment_cache:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: D:\DockerData\facial_alignment
 
 services:
   # ===========================================================================
@@ -393,22 +416,22 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # ML-Custom Service (27 enterprise-grade features with 93-96% accuracy)
+  # Facial Alignment Network Service (27 enterprise-grade features with 93-96% accuracy)
   # Uses Face Alignment Network (FAN) + Advanced Analytics
   # ---------------------------------------------------------------------------
-  ml-custom:
+  facial-alignment:
     build:
-      context: ./services/ml-models/ml-custom
+      context: ./services/ml-models/facial-alignment
       dockerfile: Dockerfile
-    container_name: ml-custom-service
+    container_name: facial-alignment-service
     environment:
-      - SERVICE_NAME=ml-custom
+      - SERVICE_NAME=facial-alignment
       - PORT=8025
       - TORCH_HOME=/app/.cache/torch  # Persist torch cache
     ports:
       - "8025:8025"
     volumes:
-      - ml_custom_cache:/app/.cache  # Persist model weights (no re-download)
+      - facial_alignment_cache:/app/.cache  # Persist model weights (no re-download)
     networks:
       - facial-network
     deploy:
@@ -544,7 +567,7 @@ services:
       - SAM_URL=http://sam:8009
       - CLAUDE_API_URL=http://claude-api:8010
       - DERM_FOUNDATION_URL=http://derm-foundation:8024
-      - ML_CUSTOM_URL=http://ml-custom:8025
+      - FACIAL_ALIGNMENT_URL=http://facial-alignment:8025
       - IMAGE_STORAGE_URL=http://image-storage:8022
       - USER_HISTORY_URL=http://user-history:8023
       - RECOMMENDATION_URL=http://recommendation:8021
@@ -563,7 +586,7 @@ services:
       - sam
       - claude-api
       - derm-foundation
-      - ml-custom
+      - facial-alignment
       - image-storage
       - user-history
       - recommendation
